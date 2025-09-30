@@ -97,6 +97,7 @@ const userSchema = new mongoose.Schema({
   username: { type: String, required: true, unique: true },
   password: { type: String, required: true },
   folders: [folderSchema],
+  subjects: { type: [String], default: [] }, // Ensure default is empty array
   createdAt: { type: Date, default: Date.now }
 });
 
@@ -104,8 +105,37 @@ const User = mongoose.model('User', userSchema);
 
 // --- SIMPLE TOKEN HELPERS (Base64 JSON) ---
 // NOTE: base64 token is NOT secure for production. This keeps your previous approach.
-const createToken = (payload) => Buffer.from(JSON.stringify(payload)).toString('base64');
-const verifyToken = (token) => JSON.parse(Buffer.from(token, 'base64').toString());
+const createToken = (payload) => {
+    const tokenData = {
+        ...payload,
+        createdAt: new Date().toISOString()
+    };
+    return Buffer.from(JSON.stringify(tokenData)).toString('base64');
+};
+const verifyToken = (token) => {
+    try {
+        // Add better error handling for malformed tokens
+        if (!token || typeof token !== 'string') {
+            throw new Error('Invalid token format');
+        }
+        
+        const decoded = JSON.parse(Buffer.from(token, 'base64').toString());
+        
+        // Add token expiration check (optional - 30 days)
+        if (decoded.createdAt) {
+            const tokenAge = Date.now() - new Date(decoded.createdAt).getTime();
+            const maxAge = 30 * 24 * 60 * 60 * 1000; // 30 days
+            if (tokenAge > maxAge) {
+                throw new Error('Token expired');
+            }
+        }
+        
+        return decoded;
+    } catch (err) {
+        console.error('Token verification failed:', err.message);
+        throw new Error('Invalid or expired token');
+    }
+};
 
 const authenticateToken = (req, res, next) => {
     const authHeader = req.headers['authorization'];
@@ -132,7 +162,12 @@ app.post('/api/signup', async (req, res) => {
         if (existing) return res.status(400).send({ message: 'Username already exists' });
 
         const hashed = await bcrypt.hash(password, 10);
-        const user = new User({ username, password: hashed, folders: [] });
+        const user = new User({ 
+            username, 
+            password: hashed, 
+            folders: [],
+            subjects: [] // Initialize empty subjects array
+        });
         await user.save();
 
         const token = createToken({ userId: user._id, username: user.username });
@@ -168,22 +203,53 @@ app.get('/api/user', authenticateToken, async (req, res) => {
     try {
         const user = await User.findById(req.user.userId).select('-password');
         if (!user) return res.status(404).send({ message: 'User not found' });
-        res.status(200).send({ username: user.username, folders: user.folders || [] });
+        res.status(200).send({ 
+            username: user.username, 
+            folders: user.folders || [],
+            subjects: user.subjects || [] // Add this line
+        });
     } catch (err) {
         console.error('Error fetching user data:', err);
         res.status(500).send({ message: 'Failed to fetch user data' });
     }
 });
 
+
 app.post('/api/user/data', authenticateToken, async (req, res) => {
     try {
-        const { folders } = req.body;
-        if (!Array.isArray(folders)) return res.status(400).send({ message: 'Folders must be an array' });
+        const { folders, subjects } = req.body;
+        
+        console.log('Received data for saving:', { 
+            foldersCount: folders?.length, 
+            subjectsCount: subjects?.length,
+            subjects: subjects 
+        });
 
-        const user = await User.findByIdAndUpdate(req.user.userId, { folders }, { new: true }).select('-password');
+        const updateData = {};
+        if (Array.isArray(folders)) updateData.folders = folders;
+        if (Array.isArray(subjects)) updateData.subjects = subjects;
+
+        console.log('Update data:', updateData);
+
+        const user = await User.findByIdAndUpdate(
+            req.user.userId, 
+            { $set: updateData }, // Use $set to properly update the fields
+            { new: true }
+        ).select('-password');
+        
         if (!user) return res.status(404).send({ message: 'User not found' });
 
-        res.status(200).send({ message: 'Data saved successfully', folders: user.folders });
+        console.log('Saved user data:', { 
+            savedFolders: user.folders?.length,
+            savedSubjects: user.subjects?.length,
+            savedSubjectsList: user.subjects
+        });
+
+        res.status(200).send({ 
+            message: 'Data saved successfully', 
+            folders: user.folders,
+            subjects: user.subjects 
+        });
     } catch (err) {
         console.error('Error saving user data:', err);
         res.status(500).send({ message: 'Failed to save data' });
@@ -464,14 +530,20 @@ app.get('/api/user/profile', authenticateToken, async (req, res) => {
 
 app.put('/api/user/username', authenticateToken, async (req, res) => {
     try {
-        const { username } = req.body;
-        if (!username || !username.trim()) return res.status(400).send({ message: 'Username is required' });
+        const { username, password } = req.body;
+        if (!username || !password) return res.status(400).send({ message: 'Username and password required' });
 
-        const already = await User.findOne({ username });
-        if (already) return res.status(400).send({ message: 'Username already exists' });
-
-        const user = await User.findByIdAndUpdate(req.user.userId, { username: username.trim() }, { new: true }).select('-password');
+        const user = await User.findById(req.user.userId);
         if (!user) return res.status(404).send({ message: 'User not found' });
+
+        const match = await bcrypt.compare(password, user.password);
+        if (!match) return res.status(401).send({ message: 'Password is incorrect' });
+
+        const existingUser = await User.findOne({ username });
+        if (existingUser) return res.status(400).send({ message: 'Username already exists' });
+
+        user.username = username;
+        await user.save();
 
         res.status(200).send({ message: 'Username updated successfully', username: user.username });
     } catch (err) {
@@ -480,6 +552,7 @@ app.put('/api/user/username', authenticateToken, async (req, res) => {
     }
 });
 
+// Change password
 app.put('/api/user/password', authenticateToken, async (req, res) => {
     try {
         const { currentPassword, newPassword } = req.body;
@@ -502,8 +575,8 @@ app.put('/api/user/password', authenticateToken, async (req, res) => {
     }
 });
 
-// Replace the current delete account endpoint with this:
-app.delete('/api/delete-account', authenticateToken, async (req, res) => {
+
+app.delete('/api/user', authenticateToken, async (req, res) => {
     try {
         const user = await User.findByIdAndDelete(req.user.userId);
         if (!user) return res.status(404).send({ message: 'User not found' });
