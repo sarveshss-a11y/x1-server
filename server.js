@@ -406,37 +406,35 @@ app.delete('/api/folders/:folderId', authenticateToken, async (req, res) => {
 });
 
 // --- MARKS ENDPOINTS ---
+// In server.js - Update the marks creation endpoint
+// In server.js - Add validation
 app.post('/api/folders/:folderId/marks', authenticateToken, async (req, res) => {
     try {
         const { folderId } = req.params;
         const { subject, marksObtained, totalMarks, date } = req.body;
 
-        const user = await User.findById(req.user.userId);
-        if (!user) return res.status(404).json({ message: 'User not found' });
+        // Validate required fields
+        if (!subject || !subject.trim()) {
+            return res.status(400).json({ message: 'Subject is required' });
+        }
+        
+        if (marksObtained === undefined || totalMarks === undefined) {
+            return res.status(400).json({ message: 'Marks obtained and total marks are required' });
+        }
 
-        const folder = findFolderRecursively(user.folders, folderId);
-        if (!folder) return res.status(404).json({ message: 'Folder not found' });
+        // Validate numeric values
+        if (isNaN(parseFloat(marksObtained)) || isNaN(parseFloat(totalMarks))) {
+            return res.status(400).json({ message: 'Marks must be valid numbers' });
+        }
 
-        // Ensure folder.marks exists
-        folder.marks = folder.marks || [];
+        if (parseFloat(totalMarks) <= 0) {
+            return res.status(400).json({ message: 'Total marks must be greater than 0' });
+        }
 
-        const newMark = {
-            id: Date.now().toString(),
-            subject: subject || 'Untitled',
-            marksObtained: parseFloat(marksObtained) || 0,
-            totalMarks: parseFloat(totalMarks) || 0,
-            date: date || new Date().toISOString().split('T')[0],
-            createdAt: new Date().toISOString(),
-            folderId: folderId
-        };
-
-        folder.marks.push(newMark);
-        await user.save();
-
-        res.status(201).json({ message: 'Marks added successfully', mark: newMark });
+        // ... rest of your existing code
     } catch (err) {
         console.error('Error adding marks:', err);
-        res.status(500).json({ message: 'Internal server error' });
+        res.status(500).json({ message: 'Internal server error', error: err.message });
     }
 });
 
