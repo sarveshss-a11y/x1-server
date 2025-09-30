@@ -114,12 +114,16 @@ const createToken = (payload) => {
 };
 const verifyToken = (token) => {
     try {
-        // Add better error handling for malformed tokens
         if (!token || typeof token !== 'string') {
             throw new Error('Invalid token format');
         }
         
         const decoded = JSON.parse(Buffer.from(token, 'base64').toString());
+        
+        // Verify required fields
+        if (!decoded.userId || !decoded.username) {
+            throw new Error('Token missing required fields');
+        }
         
         // Add token expiration check (optional - 30 days)
         if (decoded.createdAt) {
@@ -140,13 +144,17 @@ const verifyToken = (token) => {
 const authenticateToken = (req, res, next) => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
-    if (!token) return res.status(401).send({ message: 'Access token required' });
+    
+    if (!token) {
+        return res.status(401).send({ message: 'Access token required' });
+    }
 
     try {
         req.user = verifyToken(token);
         next();
     } catch (err) {
-        return res.status(403).send({ message: 'Invalid or expired token' });
+        console.error('Authentication error:', err.message);
+        return res.status(401).send({ message: 'Invalid or expired token' });
     }
 };
 
@@ -213,6 +221,17 @@ app.get('/api/user', authenticateToken, async (req, res) => {
         res.status(500).send({ message: 'Failed to fetch user data' });
     }
 });
+
+app.post('/api/refresh-token', authenticateToken, (req, res) => {
+    // Create a new token with the same user data
+    const newToken = createToken({ 
+        userId: req.user.userId, 
+        username: req.user.username 
+    });
+    
+    res.status(200).send({ token: newToken });
+});
+
 
 
 app.post('/api/user/data', authenticateToken, async (req, res) => {
