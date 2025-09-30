@@ -97,6 +97,7 @@ const userSchema = new mongoose.Schema({
   username: { type: String, required: true, unique: true },
   password: { type: String, required: true },
   folders: [folderSchema],
+  subjects: { type: [String], default: [] }, // Add this line
   createdAt: { type: Date, default: Date.now }
 });
 
@@ -168,22 +169,39 @@ app.get('/api/user', authenticateToken, async (req, res) => {
     try {
         const user = await User.findById(req.user.userId).select('-password');
         if (!user) return res.status(404).send({ message: 'User not found' });
-        res.status(200).send({ username: user.username, folders: user.folders || [] });
+        res.status(200).send({ 
+            username: user.username, 
+            folders: user.folders || [],
+            subjects: user.subjects || [] // Add this line
+        });
     } catch (err) {
         console.error('Error fetching user data:', err);
         res.status(500).send({ message: 'Failed to fetch user data' });
     }
 });
 
+
 app.post('/api/user/data', authenticateToken, async (req, res) => {
     try {
-        const { folders } = req.body;
-        if (!Array.isArray(folders)) return res.status(400).send({ message: 'Folders must be an array' });
+        const { folders, subjects } = req.body;
+        
+        const updateData = {};
+        if (Array.isArray(folders)) updateData.folders = folders;
+        if (Array.isArray(subjects)) updateData.subjects = subjects;
 
-        const user = await User.findByIdAndUpdate(req.user.userId, { folders }, { new: true }).select('-password');
+        const user = await User.findByIdAndUpdate(
+            req.user.userId, 
+            updateData, 
+            { new: true }
+        ).select('-password');
+        
         if (!user) return res.status(404).send({ message: 'User not found' });
 
-        res.status(200).send({ message: 'Data saved successfully', folders: user.folders });
+        res.status(200).send({ 
+            message: 'Data saved successfully', 
+            folders: user.folders,
+            subjects: user.subjects 
+        });
     } catch (err) {
         console.error('Error saving user data:', err);
         res.status(500).send({ message: 'Failed to save data' });
