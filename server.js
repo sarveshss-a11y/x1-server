@@ -408,6 +408,7 @@ app.delete('/api/folders/:folderId', authenticateToken, async (req, res) => {
 // --- MARKS ENDPOINTS ---
 // In server.js - Update the marks creation endpoint
 // In server.js - Add validation
+// --- MARKS ENDPOINTS ---
 app.post('/api/folders/:folderId/marks', authenticateToken, async (req, res) => {
     try {
         const { folderId } = req.params;
@@ -431,7 +432,39 @@ app.post('/api/folders/:folderId/marks', authenticateToken, async (req, res) => 
             return res.status(400).json({ message: 'Total marks must be greater than 0' });
         }
 
-        // ... rest of your existing code
+        if (parseFloat(marksObtained) > parseFloat(totalMarks)) {
+            return res.status(400).json({ message: 'Marks obtained cannot exceed total marks' });
+        }
+
+        const user = await User.findById(req.user.userId);
+        if (!user) return res.status(404).json({ message: 'User not found' });
+
+        const folder = findFolderRecursively(user.folders, folderId);
+        if (!folder) return res.status(404).json({ message: 'Folder not found' });
+
+        // Initialize marks array if it doesn't exist
+        folder.marks = folder.marks || [];
+
+        // Create new mark
+        const newMark = {
+            id: Date.now().toString(),
+            subject: subject.trim(),
+            marksObtained: parseFloat(marksObtained),
+            totalMarks: parseFloat(totalMarks),
+            date: date || new Date().toISOString().split('T')[0],
+            createdAt: new Date().toISOString(),
+            folderId: folderId
+        };
+
+        // Add mark to folder
+        folder.marks.push(newMark);
+
+        await user.save();
+        
+        res.status(201).json({ 
+            message: 'Marks added successfully', 
+            mark: newMark 
+        });
     } catch (err) {
         console.error('Error adding marks:', err);
         res.status(500).json({ message: 'Internal server error', error: err.message });
