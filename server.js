@@ -97,7 +97,6 @@ const userSchema = new mongoose.Schema({
   username: { type: String, required: true, unique: true },
   password: { type: String, required: true },
   folders: [folderSchema],
-  subjects: { type: [String], default: [] }, // Add this line
   createdAt: { type: Date, default: Date.now }
 });
 
@@ -169,39 +168,22 @@ app.get('/api/user', authenticateToken, async (req, res) => {
     try {
         const user = await User.findById(req.user.userId).select('-password');
         if (!user) return res.status(404).send({ message: 'User not found' });
-        res.status(200).send({ 
-            username: user.username, 
-            folders: user.folders || [],
-            subjects: user.subjects || [] // Add this line
-        });
+        res.status(200).send({ username: user.username, folders: user.folders || [] });
     } catch (err) {
         console.error('Error fetching user data:', err);
         res.status(500).send({ message: 'Failed to fetch user data' });
     }
 });
 
-
 app.post('/api/user/data', authenticateToken, async (req, res) => {
     try {
-        const { folders, subjects } = req.body;
-        
-        const updateData = {};
-        if (Array.isArray(folders)) updateData.folders = folders;
-        if (Array.isArray(subjects)) updateData.subjects = subjects;
+        const { folders } = req.body;
+        if (!Array.isArray(folders)) return res.status(400).send({ message: 'Folders must be an array' });
 
-        const user = await User.findByIdAndUpdate(
-            req.user.userId, 
-            updateData, 
-            { new: true }
-        ).select('-password');
-        
+        const user = await User.findByIdAndUpdate(req.user.userId, { folders }, { new: true }).select('-password');
         if (!user) return res.status(404).send({ message: 'User not found' });
 
-        res.status(200).send({ 
-            message: 'Data saved successfully', 
-            folders: user.folders,
-            subjects: user.subjects 
-        });
+        res.status(200).send({ message: 'Data saved successfully', folders: user.folders });
     } catch (err) {
         console.error('Error saving user data:', err);
         res.status(500).send({ message: 'Failed to save data' });
@@ -482,20 +464,14 @@ app.get('/api/user/profile', authenticateToken, async (req, res) => {
 
 app.put('/api/user/username', authenticateToken, async (req, res) => {
     try {
-        const { username, password } = req.body;
-        if (!username || !password) return res.status(400).send({ message: 'Username and password required' });
+        const { username } = req.body;
+        if (!username || !username.trim()) return res.status(400).send({ message: 'Username is required' });
 
-        const user = await User.findById(req.user.userId);
+        const already = await User.findOne({ username });
+        if (already) return res.status(400).send({ message: 'Username already exists' });
+
+        const user = await User.findByIdAndUpdate(req.user.userId, { username: username.trim() }, { new: true }).select('-password');
         if (!user) return res.status(404).send({ message: 'User not found' });
-
-        const match = await bcrypt.compare(password, user.password);
-        if (!match) return res.status(401).send({ message: 'Password is incorrect' });
-
-        const existingUser = await User.findOne({ username });
-        if (existingUser) return res.status(400).send({ message: 'Username already exists' });
-
-        user.username = username;
-        await user.save();
 
         res.status(200).send({ message: 'Username updated successfully', username: user.username });
     } catch (err) {
@@ -504,7 +480,6 @@ app.put('/api/user/username', authenticateToken, async (req, res) => {
     }
 });
 
-// Change password
 app.put('/api/user/password', authenticateToken, async (req, res) => {
     try {
         const { currentPassword, newPassword } = req.body;
@@ -527,8 +502,8 @@ app.put('/api/user/password', authenticateToken, async (req, res) => {
     }
 });
 
-
-app.delete('/api/user', authenticateToken, async (req, res) => {
+// Replace the current delete account endpoint with this:
+app.delete('/api/delete-account', authenticateToken, async (req, res) => {
     try {
         const user = await User.findByIdAndDelete(req.user.userId);
         if (!user) return res.status(404).send({ message: 'User not found' });
